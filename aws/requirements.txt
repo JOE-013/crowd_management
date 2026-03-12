@@ -1,0 +1,11 @@
+fastapi
+uvicorn
+pandas
+numpy
+scikit-learn
+plotly
+joblib
+Pillow
+boto3
+botocore
+python-dotenv
