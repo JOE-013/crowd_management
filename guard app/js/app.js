@@ -15,8 +15,67 @@ const USERS = {
 let currentUser = null;
 let pinBuffer = "";
 
+function createRipple(event) {
+  const button = event.currentTarget;
+  const circle = document.createElement("span");
+  const diameter = Math.max(button.clientWidth, button.clientHeight);
+  const radius = diameter / 2;
+  let clientX, clientY;
+  if(event.type === 'touchstart') {
+    clientX = event.touches[0].clientX;
+    clientY = event.touches[0].clientY;
+  } else {
+    clientX = event.clientX;
+    clientY = event.clientY;
+  }
+  const rect = button.getBoundingClientRect();
+  circle.style.width = circle.style.height = `${diameter}px`;
+  circle.style.left = `${clientX - rect.left - radius}px`;
+  circle.style.top = `${clientY - rect.top - radius}px`;
+  circle.classList.add("ripple");
+  const ripple = button.querySelector(".ripple");
+  if (ripple) ripple.remove();
+  button.appendChild(circle);
+}
+
+function updatePinUI() {
+  const boxes = document.querySelectorAll(".pin-box");
+  const len = pinBuffer.length;
+  
+  boxes.forEach((box, i) => {
+    // Fill dot
+    if (i < len) {
+      box.textContent = "•";
+      box.classList.add("filled");
+    } else {
+      box.textContent = "";
+      box.classList.remove("filled");
+    }
+    
+    // Active pulse
+    if (i === len && len < 4) {
+      box.classList.add("active");
+    } else {
+      box.classList.remove("active");
+    }
+  });
+  
+  // Also update hidden input
+  document.getElementById("input-pin").value = pinBuffer;
+}
+
+// Initialize active state
+document.addEventListener("DOMContentLoaded", () => {
+  if (document.getElementById("screen-login").classList.contains("active")) {
+    updatePinUI();
+  }
+});
+
 // Numpad
 document.querySelectorAll(".num").forEach(btn => {
+  btn.addEventListener("mousedown", createRipple);
+  btn.addEventListener("touchstart", createRipple, {passive: true});
+  
   btn.addEventListener("click", () => {
     const n = btn.dataset.n;
     if (n === "clear") {
@@ -26,7 +85,7 @@ document.querySelectorAll(".num").forEach(btn => {
     } else {
       if (pinBuffer.length < 4) pinBuffer += n;
     }
-    document.getElementById("input-pin").value = "•".repeat(pinBuffer.length);
+    updatePinUI();
   });
 });
 
@@ -43,11 +102,20 @@ function attemptLogin() {
   if (user && user.pin === pin) {
     currentUser = { badge, name: user.name };
     errEl.classList.add("hidden");
-    showDashboard();
+    const wrap = document.querySelector(".login-wrap");
+    wrap.classList.add("unlocking");
+    setTimeout(() => {
+      showDashboard();
+      wrap.classList.remove("unlocking");
+      
+      // Stop login particles/orbs purely for performance
+      const orbs = document.querySelector(".cyber-orbs");
+      if (orbs) orbs.style.display = "none";
+    }, 800);
   } else {
     errEl.classList.remove("hidden");
     pinBuffer = "";
-    document.getElementById("input-pin").value = "";
+    updatePinUI();
     // Shake animation
     const wrap = document.querySelector(".login-wrap");
     wrap.style.animation = "none";
@@ -87,14 +155,40 @@ document.getElementById("scenario-select").addEventListener("change", async (e) 
 });
 
 // ── Main loop ─────────────────────────────────────────────────────────────
+let _simInterval = null;
+
 async function startApp() {
   await setScenario("normal");
+  document.getElementById("scenario-select").value = "normal";
   renderAll();
-  setInterval(async () => {
+  
+  if (_simInterval) clearInterval(_simInterval);
+  _simInterval = setInterval(async () => {
     await simTick();
     renderAll();
   }, 3000);
 }
+
+// ── Logout ────────────────────────────────────────────────────────────────
+document.getElementById("btn-logout").addEventListener("click", () => {
+  if (_simInterval) {
+    clearInterval(_simInterval);
+    _simInterval = null;
+  }
+  
+  currentUser = null;
+  pinBuffer = "";
+  updatePinUI();
+  document.getElementById("input-badge").value = "";
+  
+  switchTab("alerts");
+  
+  document.getElementById("screen-dashboard").classList.remove("active");
+  document.getElementById("screen-login").classList.add("active");
+  
+  const orbs = document.querySelector(".cyber-orbs");
+  if (orbs) orbs.style.display = "block";
+});
 
 function renderAll() {
   renderAlertCards();
@@ -472,6 +566,85 @@ function alertTeamFromModal() {
 let touchStartY = 0;
 const sheet = document.getElementById("modal-sheet");
 sheet.addEventListener("touchstart", e => { touchStartY = e.touches[0].clientY; });
-sheet.addEventListener("touchend", e => {
-  if (e.changedTouches[0].clientY - touchStartY > 80) closeHeatmap();
-});
+
+// ── Particles Background for Login ─────────────────────────────────────────
+function initParticles() {
+  const canvas = document.getElementById('login-particles');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  
+  let width, height;
+  let particles = [];
+  
+  function resize() {
+    width = canvas.width = window.innerWidth;
+    height = canvas.height = window.innerHeight;
+  }
+  
+  window.addEventListener('resize', resize);
+  resize();
+  
+  class Particle {
+    constructor() {
+      this.x = Math.random() * width;
+      this.y = Math.random() * height;
+      this.vx = (Math.random() - 0.5) * 0.5;
+      this.vy = (Math.random() - 0.5) * 0.5;
+      this.radius = Math.random() * 2 + 0.5;
+      this.baseAlpha = Math.random() * 0.4 + 0.1;
+    }
+    update() {
+      this.x += this.vx;
+      this.y += this.vy;
+      if (this.x < 0 || this.x > width) this.vx *= -1;
+      if (this.y < 0 || this.y > height) this.vy *= -1;
+    }
+    draw() {
+      ctx.beginPath();
+      ctx.arc(this.x, this.y, this.radius, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0, 255, 136, ${this.baseAlpha})`;
+      ctx.fill();
+    }
+  }
+  
+  for (let i = 0; i < 50; i++) {
+    particles.push(new Particle());
+  }
+  
+  function animate() {
+    if(!document.getElementById('screen-login').classList.contains('active')) {
+      requestAnimationFrame(animate);
+      return;
+    }
+    
+    ctx.clearRect(0, 0, width, height);
+    
+    for (let i = 0; i < particles.length; i++) {
+      for (let j = i + 1; j < particles.length; j++) {
+        const dx = particles[i].x - particles[j].x;
+        const dy = particles[i].y - particles[j].y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist < 120) {
+          ctx.beginPath();
+          ctx.strokeStyle = `rgba(0, 255, 136, ${0.15 * (1 - dist/120)})`;
+          ctx.lineWidth = 1;
+          ctx.moveTo(particles[i].x, particles[i].y);
+          ctx.lineTo(particles[j].x, particles[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+    
+    particles.forEach(p => {
+      p.update();
+      p.draw();
+    });
+    
+    requestAnimationFrame(animate);
+  }
+  
+  animate();
+}
+
+initParticles();
